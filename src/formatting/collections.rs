@@ -15,7 +15,7 @@ impl<'a> Formatter<'a> {
     // ─────────────────────────────────────────────────────────────────────────
 
     /// Format a list expression, choosing inline or multiline layout.
-    pub(super) fn format_list(&mut self, items: &[ListItem]) {
+    pub(super) fn format_list(&mut self, items: &[ListItem], span: Span) {
         if items.is_empty() {
             self.write("[]");
             return;
@@ -23,6 +23,7 @@ impl<'a> Formatter<'a> {
 
         let uses_commas = self.list_uses_commas(items);
         let source_has_newline = self.list_has_source_newline(items);
+        let has_comments_in_list = self.has_comments_in_span(span.start, span.end);
 
         let all_simple = items.iter().all(|item| match item {
             ListItem::Item(expr) | ListItem::Spread(_, expr) => self.is_simple_expr(expr),
@@ -30,8 +31,10 @@ impl<'a> Formatter<'a> {
 
         let inline_single_item = items.len() == 1 && all_simple;
         let should_preserve_multiline = source_has_newline && items.len() > 1;
-        let should_inline =
-            inline_single_item || (all_simple && items.len() <= 5 && !should_preserve_multiline);
+        let should_inline = !has_comments_in_list
+            && (inline_single_item
+                || (all_simple && items.len() <= 5 && !should_preserve_multiline))
+            && self.inline_list_fits_on_line(items, uses_commas);
 
         if should_inline {
             self.write("[");
@@ -48,17 +51,25 @@ impl<'a> Formatter<'a> {
             self.write("]");
         } else {
             self.write("[");
+            let first_item_start = self.list_item_bounds(&items[0]).0;
+            self.write_inline_comment_bounded(span.start.saturating_add(1), Some(first_item_start));
             self.newline();
             self.indent_level += 1;
+            let closing_bracket_pos = span.end.saturating_sub(1);
 
             let mut idx = 0;
             while idx < items.len() {
+                let (item_start, _) = self.list_item_bounds(&items[idx]);
+                self.write_comments_before(item_start);
                 self.write_indent();
 
                 if idx + 1 < items.len() {
                     let current = &items[idx];
                     let next = &items[idx + 1];
                     if self.should_pair_flag_value_items(current, next)
+                        && !self.list_item_has_inline_comment(current, Some(closing_bracket_pos))
+                        && !self.list_item_has_inline_comment(next, Some(closing_bracket_pos))
+                        && !self.list_items_have_comments_between(current, next)
                         && self.paired_list_items_fit_on_line(current, next, uses_commas)
                     {
                         self.format_list_item(current);
@@ -68,6 +79,9 @@ impl<'a> Formatter<'a> {
                             self.write(" ");
                         }
                         self.format_list_item(next);
+                        let (_, next_end) = self.list_item_bounds(next);
+                        self.write_inline_comment_bounded(next_end, Some(closing_bracket_pos));
+                        self.last_pos = self.last_pos.max(next_end);
                         self.newline();
                         idx += 2;
                         continue;
@@ -75,10 +89,14 @@ impl<'a> Formatter<'a> {
                 }
 
                 self.format_list_item(&items[idx]);
+                let (_, item_end) = self.list_item_bounds(&items[idx]);
+                self.write_inline_comment_bounded(item_end, Some(closing_bracket_pos));
+                self.last_pos = self.last_pos.max(item_end);
                 self.newline();
                 idx += 1;
             }
 
+            self.write_comments_before(closing_bracket_pos);
             self.indent_level -= 1;
             self.write_indent();
             self.write("]");
@@ -141,6 +159,25 @@ impl<'a> Formatter<'a> {
         self.list_item_is_flag_string(current) && !self.list_item_is_flag_string(next)
     }
 
+    fn list_items_have_comments_between(&self, current: &ListItem, next: &ListItem) -> bool {
+        let (_, current_end) = self.list_item_bounds(current);
+        let (next_start, _) = self.list_item_bounds(next);
+        self.has_comments_in_span(current_end, next_start)
+    }
+
+    fn list_item_has_inline_comment(&self, item: &ListItem, upper: Option<usize>) -> bool {
+        let (_, item_end) = self.list_item_bounds(item);
+        let line_end = self.source[item_end..]
+            .iter()
+            .position(|&b| b == b'\n')
+            .map_or(self.source.len(), |p| item_end + p);
+        let effective_end = upper.map_or(line_end, |u| u.min(line_end));
+
+        self.comments.iter().enumerate().any(|(i, (span, _))| {
+            !self.written_comments[i] && span.start >= item_end && span.start < effective_end
+        })
+    }
+
     fn list_item_is_flag_string(&self, item: &ListItem) -> bool {
         let expr = match item {
             ListItem::Item(expr) => expr,
@@ -159,6 +196,20 @@ impl<'a> Formatter<'a> {
 
         let inner = &trimmed[1..trimmed.len() - 1];
         inner.starts_with(b"-")
+    }
+
+    fn inline_list_fits_on_line(&self, items: &[ListItem], uses_commas: bool) -> bool {
+        let mut total_len = 2; // for [ and ]
+        for (i, item) in items.iter().enumerate() {
+            let item_len = self.probe_format(|p| p.format_list_item(item)).len();
+            total_len += item_len;
+            if i > 0 {
+                total_len += if uses_commas { 2 } else { 1 }; // separator
+            }
+        }
+
+        let indent_len = self.config.indent * self.indent_level;
+        indent_len + total_len <= self.config.line_length
     }
 
     fn paired_list_items_fit_on_line(
