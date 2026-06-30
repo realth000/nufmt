@@ -35,6 +35,8 @@ pub struct Config {
     pub margin_is_explicit: bool,
     /// Glob patterns for files to exclude from formatting.
     pub excludes: Vec<String>,
+    /// The quotes style on strings.
+    pub double_quotes: bool,
 }
 
 impl Default for Config {
@@ -46,6 +48,7 @@ impl Default for Config {
             margin: 1,
             margin_is_explicit: false,
             excludes: Vec::new(),
+            double_quotes: false,
         }
     }
 }
@@ -63,6 +66,7 @@ impl Config {
             margin,
             margin_is_explicit: true,
             excludes: Vec::new(),
+            double_quotes: false,
         }
     }
 }
@@ -91,6 +95,7 @@ impl TryFrom<Value> for Config {
                     config.margin_is_explicit = true;
                 }
                 "exclude" => config.excludes = parse_string_list(value)?,
+                "double_quotes" => config.double_quotes = parse_double_quotes(value)?,
                 unknown => return Err(ConfigError::UnknownOption(unknown.to_string())),
             }
         }
@@ -181,4 +186,18 @@ fn parse_string_list(value: &Value) -> Result<Vec<String>, ConfigError> {
             Ok(val.clone())
         })
         .collect()
+}
+
+/// Parse a value as the bool.
+fn parse_double_quotes(value: &Value) -> Result<bool, ConfigError> {
+    let Value::Bool { val, .. } = value else {
+        return Err(ConfigError::InvalidOptionType(
+            "double_quotes".to_string(),
+            value.get_type().to_string(),
+            "true or false",
+        ));
+    };
+
+    Ok(true)
+
 }

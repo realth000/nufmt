@@ -19,7 +19,6 @@ impl<'a> Formatter<'a> {
             | Expr::Bool(_)
             | Expr::Nothing
             | Expr::DateTime(_)
-            | Expr::String(_)
             | Expr::RawString(_)
             | Expr::Binary(_)
             | Expr::Filepath(_, _)
@@ -32,6 +31,23 @@ impl<'a> Formatter<'a> {
             | Expr::ImportPattern(_)
             | Expr::Overlay(_) => {
                 self.write_expr_span(expr);
+            }
+
+            Expr::String(s) => {
+                if self.config.double_quotes {
+                    let first_char = self.source[expr.span.start] as char;
+                    if (first_char == '\'' || first_char == '`')
+                        && s.chars().all(|ch| ch != '\\' && ch != '"')
+                    {
+                        self.write("\"");
+                        self.write(s);
+                        self.write("\"");
+                    } else {
+                        self.write_expr_span(expr)
+                    }
+                } else {
+                    self.write_expr_span(expr)
+                }
             }
 
             Expr::Garbage => {
