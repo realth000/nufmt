@@ -168,7 +168,8 @@ pub(super) fn expr_contains_garbage(working_set: &StateWorkingSet<'_>, expr: &Ex
         | Expr::ImportPattern(_)
         | Expr::Overlay(_)
         | Expr::Signature(_)
-        | Expr::ValueWithUnit(_) => false,
+        | Expr::ValueWithUnit(_)
+        | Expr::UnaryMinus(_) => false,
     }
 }
 

@@ -30,7 +30,8 @@ impl<'a> Formatter<'a> {
             | Expr::StringInterpolation(_)
             | Expr::GlobInterpolation(_, _)
             | Expr::ImportPattern(_)
-            | Expr::Overlay(_) => {
+            | Expr::Overlay(_)
+            | Expr::UnaryMinus(_) => {
                 self.write_expr_span(expr);
             }
 

@@ -913,6 +913,7 @@ impl<'a> Formatter<'a> {
         match &positional.expr {
             Expr::String(_) => self.format_expression(positional),
             Expr::Signature(sig) => {
+                println!(">>> signature: {sig:#?}");
                 if self.has_comments_in_span(positional.span.start, positional.span.end) {
                     self.write_expr_span(positional);
                 } else {
